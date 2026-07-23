@@ -1,6 +1,3 @@
-# Command to zip your python code
-Compress-Archive -Path "lambda_function.py" -DestinationPath "lambda.zip"
-
 # Non-empty files
     ## Audit
         acctian_lo_strl_purpose.trl
