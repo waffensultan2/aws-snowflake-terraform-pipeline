@@ -156,7 +156,7 @@ def parser(filename):
     if filename == "acctian_lo_stl_purpose.trl":
         with open(
             f"../hdmf_dummy_trl_files/{filename}", "rb"
-        ) as file:  # Remove this later
+        ) as file:  # Remove this later and directly read from event
             return parse_acctian_lo_stl_purpose(file)
     if filename in file_info:
         result = []
