@@ -16,3 +16,14 @@
     lo_stl_release_mode.trl
     lo_stl_scheme_master.trl
     membership_category.trl
+
+
+# Required columns (TRANSACTION TABLES ONLY; DO THIS IN GLUE)
+scd_key
+scd_version
+eff_start_date
+eff_end_date
+is_current
+is_deleted
+change_type
+changed_columns
