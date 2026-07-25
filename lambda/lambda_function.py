@@ -9,6 +9,7 @@
 # 5. Pass passed/rejected rows to "passed/<table>" or "rejected/<table>"
 
 import io
+import json
 import struct
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,17 @@ import boto3
 import pandas as pd
 
 s3 = boto3.client("s3")
+
+
+def write_to_s3(df, bucket, table_name, prefix, batch_id):
+    if len(df) == 0:
+        return
+
+    records = df.to_dict(orient="records")
+    body = "\n".join(json.dumps(r) for r in records)
+
+    key = f"{prefix}/{table_name}/{table_name}_{batch_id}.json"
+    s3.put_object(Bucket=bucket, Key=key, Body=body)
 
 
 def lambda_handler(event, context):
@@ -40,9 +52,8 @@ def lambda_handler(event, context):
 
     valid_df, invalid_df = validate(table_name, parsed_table)
 
-    print(f"{parsed_table}")
-    print(f"Valid: {len(valid_df)}")
-    print(f"Invalid: {len(invalid_df)}")
+    write_to_s3(valid_df, bucket, table_name, "passed", batch_id)
+    write_to_s3(invalid_df, bucket, table_name, "rejected", batch_id)
 
     # tables = [
     #     "acctian_lo_stl_purpose",
