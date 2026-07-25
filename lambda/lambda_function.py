@@ -7,13 +7,13 @@
 
 # Non-empty files
 ## Audit
-    # acctian_lo_strl_purpose.trl [PARSER BUILT]
+# acctian_lo_strl_purpose.trl [PARSER BUILT]
 ## Transaction
-    # lo_stl_frontend.trl [PARSER BUILT]
-    # lo_stl_online_application.trl [PARSER BUILT]
-    # lms_noncash_collection.trl [PARSER BUILT]
-    # lms_stl_disbursement_master.trl [PARSER BUILT]
-    # pf_employer_master.trl [PARSER BUILT]
+# lo_stl_frontend.trl [PARSER BUILT]
+# lo_stl_online_application.trl [PARSER BUILT]
+# lms_noncash_collection.trl [PARSER BUILT]
+# lms_stl_disbursement_master.trl [PARSER BUILT]
+# pf_employer_master.trl [PARSER BUILT]
 
 # -- DQ --
 # 1. Binary parsing [DONE]
@@ -25,25 +25,29 @@
 # -- CODE --
 # 1. Cleanup the code [DONE]
 # 2. Convert string to int if possible ('101' -> 101) [DONE]
-# 3. DQ Checks
+# 3. DQ Checks <--- DO THIS TOMORROW!!!!!
 # 4. RISK-01 handling (empty files)
 # 5. Pass passed/rejected rows to "passed/<table>" or "rejected/<table>"
 
 import struct
+import uuid
+from datetime import datetime, timezone
 
 
 def lambda_handler():
     files = [
-        "acctian_lo_stl_purpose.trl",
+        # "acctian_lo_stl_purpose.trl",
         "lo_stl_frontend.trl",
-        "lo_stl_online_application.trl",
-        "lms_noncash_collection.trl",
-        "lms_stl_disbursement_master.trl",
-        "pf_employer_master.trl",
+        # "lo_stl_online_application.trl",
+        # "lms_noncash_collection.trl",
+        # "lms_stl_disbursement_master.trl",
+        # "pf_employer_master.trl",
     ]
 
     for file in files:
         result = parser(file)
+
+        print(result)
 
         if result:
             print(len(result))
@@ -177,11 +181,24 @@ def parser(filename):
                 if len(record) < file_info[filename]["stride"]:
                     break
 
-                username = record[12:21].decode("ascii").rstrip("\x00")
-                operation = record[44:50].decode("ascii").rstrip("\x00")
+                source_user = record[12:21].decode("ascii").rstrip("\x00")
+                cdc_op = record[44:50].decode("ascii").rstrip("\x00")
+
+                year = int.from_bytes(record[2:4], "little")
+                month = record[4]
+                day = record[6]
+                txn_sequence = int.from_bytes(record[8:12], "little")
 
                 pos = 56
-                fields = {"username": username, "operation": operation}
+                fields = {
+                    "_source_user": source_user,
+                    "_cdc_op": cdc_op,
+                    "_source_ts": f"{year:04d}-{month:02d}-{day:02d}",
+                    "_raw_id": f"acctian_lo_stl_purpose_{txn_sequence}",
+                    "_source_file": "acctian_lo_stl_purpose.trl",
+                    "_ingested_at": datetime.now(timezone.utc).isoformat(),
+                    "_batch_id": str(uuid.uuid4()),
+                }
                 for field in file_info[filename]["fields"]:
                     value, pos = read_field(record, pos)
                     fields[field] = convert_value_to_int(value)
@@ -200,8 +217,14 @@ def parse_acctian_lo_stl_purpose(file):
         if len(record) < 337:
             break
 
-        username = record[12:21].decode("ascii").rstrip("\x00")
-        operation = record[44:50].decode("ascii").rstrip("\x00")
+        source_user = record[12:21].decode("ascii").rstrip("\x00")
+        cdc_op = record[44:50].decode("ascii").rstrip("\x00")
+
+        year = int.from_bytes(record[2:4], "little")
+        month = record[4]
+        day = record[6]
+        txn_sequence = int.from_bytes(record[8:12], "little")
+
         purpose_code = record[58:64].decode("ascii").rstrip("\x00")
 
         # Loan type always comes after the marker 04 00
@@ -213,8 +236,13 @@ def parse_acctian_lo_stl_purpose(file):
         loan_type_code = record[idx + 2 : idx + 6].decode("ascii")
 
         fields = {
-            "username": username,
-            "operation": operation,
+            "_source_user": source_user,
+            "_cdc_op": cdc_op,
+            "_source_ts": f"{year:04d}-{month:02d}-{day:02d}",
+            "_raw_id": f"acctian_lo_stl_purpose_{txn_sequence}",
+            "_source_file": "acctian_lo_stl_purpose.trl",
+            "_ingested_at": datetime.now(timezone.utc).isoformat(),
+            "_batch_id": str(uuid.uuid4()),
             "purpose_code": convert_value_to_int(purpose_code),
             "purpose_description": purpose_description,
             "loan_type_code": convert_value_to_int(loan_type_code),
