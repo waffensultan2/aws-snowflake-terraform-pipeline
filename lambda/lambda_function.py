@@ -35,7 +35,6 @@ def lambda_handler(event, context):
 
     # RISK-01 check
     if len(data) == 0:
-        print(f"{table_name} is empty — RISK-01, skipping")
         return {"status": "SKIPPED", "table": table_name, "reason": "RISK-01"}
 
     parsed_table = parser(table_name, data, batch_id)

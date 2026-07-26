@@ -49,7 +49,7 @@ sf_options = {
     "sfDatabase": creds["database"],
     "sfSchema": creds["schema"],
     "sfWarehouse": creds["warehouse"],
-    "column_mapping": "name",  # <-- add this
+    "column_mapping": "name",
 }
 
 
@@ -68,7 +68,7 @@ spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args["JOB_NAME"], args)
 
-BUCKET = "waffen-migration-pipeline-bucket"  # replace with your actual bucket
+BUCKET = "waffen-migration-pipeline-bucket"
 AUDIT_TABLES = {"acctian_lo_stl_purpose"}
 TRANSACTION_TABLES = [
     "lo_stl_frontend",
@@ -109,7 +109,6 @@ def process_audit_table(table_name):
     curated_rows = list(latest_by_pk.values())
     output_df = spark.createDataFrame([Row(**r) for r in curated_rows])
     output_df.write.mode("overwrite").json(f"s3://{BUCKET}/curated/{table_name}/")
-    print(f"[AUDIT] {table_name}: {len(curated_rows)} curated rows")
 
     output_df = clean_numeric_columns(output_df, table_name)
     write_to_snowflake(output_df, table_name)
@@ -259,7 +258,6 @@ def process_transaction_table(table_name):
 
     output_df = spark.createDataFrame([Row(**r) for r in curated_rows])
     output_df.write.mode("overwrite").json(f"s3://{BUCKET}/curated/{table_name}/")
-    print(f"[TRANSACTION] {table_name}: {len(curated_rows)} curated rows")
 
     output_df = clean_numeric_columns(output_df, table_name)
     write_to_snowflake(output_df, table_name)
@@ -288,7 +286,7 @@ for t in AUDIT_TABLES:
 for t in TRANSACTION_TABLES:
     process_transaction_table(t)
 
-# ---------- RISK-01: log the 7 known empty files that never reach Glue ----------
+# ---------- RISK-01 ----------
 RISK_01_TABLES = [
     "hdmf_branches",
     "hdmf_hub_master",
