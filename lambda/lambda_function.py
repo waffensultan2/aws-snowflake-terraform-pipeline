@@ -136,12 +136,13 @@ def validate(table: str, rows: list[dict]):
 
 
 def convert_value_to_int(value):
+    if value == "":
+        return None
+
     try:
         return int(value)
     except (ValueError, TypeError):
-        pass
-
-    return value
+        return value
 
 
 def retrieve_header_metadata_columns(record, table, batch_id):

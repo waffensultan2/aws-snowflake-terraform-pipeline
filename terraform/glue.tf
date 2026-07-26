@@ -30,4 +30,8 @@ resource "aws_glue_job" "aggregation_job" {
   glue_version      = "4.0"
   number_of_workers = 2
   worker_type       = "G.1X"
+
+  default_arguments = {
+    "--extra-jars" = "s3://waffen-migration-pipeline-bucket/jars/snowflake-jdbc.jar,s3://waffen-migration-pipeline-bucket/jars/spark-snowflake.jar"
+  }
 }

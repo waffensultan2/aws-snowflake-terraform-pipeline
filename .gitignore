@@ -1,3 +1,6 @@
+# Ignore files which contain secrets
+secrets.tf
+
 # Remove data set
 hdmf_dummy_trl_files/
 

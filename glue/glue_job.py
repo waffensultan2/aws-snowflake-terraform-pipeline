@@ -1,11 +1,65 @@
 import json
 import sys
+from datetime import datetime, timezone
 
+import boto3
 from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from pyspark.sql import Row
+from pyspark.sql.functions import col, trim, when
+from pyspark.sql.types import DoubleType
+
+NUMERIC_COLUMNS = {
+    "lo_stl_frontend": ["gross_amount", "deductions", "net_amount"],
+    "lo_stl_online_application": ["term_months"],
+    "lms_noncash_collection": ["amount_code"],
+    "pf_employer_master": ["employee_count"],
+}
+
+
+all_log_rows = []  # Later for our migration log
+
+
+def clean_numeric_columns(df, table_name):
+    cols = NUMERIC_COLUMNS.get(table_name, [])
+    for c in cols:
+        df = df.withColumn(
+            c,
+            when(trim(col(c).cast("string")) == "", None)
+            .otherwise(col(c))
+            .cast(DoubleType()),
+        )
+    return df
+
+
+def get_snowflake_creds():
+    client = boto3.client("secretsmanager")
+    secret = client.get_secret_value(SecretId="waffen-hdmf-snowflake-credentials")
+    return json.loads(secret["SecretString"])
+
+
+creds = get_snowflake_creds()
+
+sf_options = {
+    "sfURL": f"{creds['account']}.snowflakecomputing.com",
+    "sfUser": creds["user"],
+    "sfPassword": creds["password"],
+    "sfDatabase": creds["database"],
+    "sfSchema": creds["schema"],
+    "sfWarehouse": creds["warehouse"],
+    "column_mapping": "name",  # <-- add this
+}
+
+
+def write_to_snowflake(df, table_name, column_order=None):
+    if column_order:
+        df = df.select(*column_order)
+    df.write.format("net.snowflake.spark.snowflake").options(**sf_options).option(
+        "dbtable", table_name
+    ).mode("append").save()
+
 
 args = getResolvedOptions(sys.argv, ["JOB_NAME"])
 sc = SparkContext()
@@ -57,6 +111,27 @@ def process_audit_table(table_name):
     output_df.write.mode("overwrite").json(f"s3://{BUCKET}/curated/{table_name}/")
     print(f"[AUDIT] {table_name}: {len(curated_rows)} curated rows")
 
+    output_df = clean_numeric_columns(output_df, table_name)
+    write_to_snowflake(output_df, table_name)
+
+    all_log_rows.append(
+        {
+            "table_name": table_name,
+            "source_file": f"{table_name}.trl",
+            "records_parsed": len(records),
+            "records_staged": len(records),  # staging = all raw parsed records
+            "records_curated": len(curated_rows),  # loaded to curated
+            "inserts": len(
+                curated_rows
+            ),  # audit tables: every row is an upsert "insert"
+            "updates": 0,
+            "deletes": 0,
+            "status": "COMPLETE",
+            "risk_flag": "",
+            "run_ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
 
 # ---------- TRANSACTION TABLE LOGIC (SCD Type 2) ----------
 def diff_columns(old, new, exclude_keys):
@@ -103,12 +178,18 @@ def process_transaction_table(table_name):
         "changed_columns",
     }
 
+    insert_count = 0
+    update_count = 0
+    delete_count = 0
+
     for r in records:
         key = r[pk]
         op = r["_cdc_op"]
         ts = r["_source_ts"]
 
         if op == "append":
+            insert_count += 1
+
             version_counter[key] = 1
             new_row = dict(r)
             new_row.update(
@@ -131,6 +212,8 @@ def process_transaction_table(table_name):
             repold_buffer[key] = r
 
         elif op == "repnew":
+            update_count += 1
+
             old_open = current_version.get(key)
             if old_open is not None:
                 # Close the previously open version
@@ -164,6 +247,8 @@ def process_transaction_table(table_name):
             curated_rows.append(new_row)
 
         elif op == "delete":
+            delete_count += 1
+
             old_open = current_version.get(key)
             if old_open is not None:
                 old_open["is_current"] = 0
@@ -176,6 +261,25 @@ def process_transaction_table(table_name):
     output_df.write.mode("overwrite").json(f"s3://{BUCKET}/curated/{table_name}/")
     print(f"[TRANSACTION] {table_name}: {len(curated_rows)} curated rows")
 
+    output_df = clean_numeric_columns(output_df, table_name)
+    write_to_snowflake(output_df, table_name)
+
+    all_log_rows.append(
+        {
+            "table_name": table_name,
+            "source_file": f"{table_name}.trl",
+            "records_parsed": len(records),
+            "records_staged": len(records),
+            "records_curated": len(curated_rows),
+            "inserts": insert_count,
+            "updates": update_count,
+            "deletes": delete_count,
+            "status": "COMPLETE",
+            "risk_flag": "",
+            "run_ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
 
 # ---------- RUN ----------
 for t in AUDIT_TABLES:
@@ -183,5 +287,35 @@ for t in AUDIT_TABLES:
 
 for t in TRANSACTION_TABLES:
     process_transaction_table(t)
+
+# ---------- RISK-01: log the 7 known empty files that never reach Glue ----------
+RISK_01_TABLES = [
+    "hdmf_branches",
+    "hdmf_hub_master",
+    "lms_transaction_status",
+    "lo_stl_bank_master",
+    "lo_stl_release_mode",
+    "lo_stl_scheme_master",
+    "membership_category",
+]
+for t in RISK_01_TABLES:
+    all_log_rows.append(
+        {
+            "table_name": t,
+            "source_file": f"{t}.trl",
+            "records_parsed": 0,
+            "records_staged": 0,
+            "records_curated": 0,
+            "inserts": 0,
+            "updates": 0,
+            "deletes": 0,
+            "status": "SKIPPED",
+            "risk_flag": "RISK-01",
+            "run_ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+log_df = spark.createDataFrame(all_log_rows)
+write_to_snowflake(log_df, "migration_log")
 
 job.commit()
